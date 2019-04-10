@@ -1,0 +1,3 @@
+[submodule "awsfrwk"]
+	path = awsfrwk
+	url = git@gitlab.lbw.com:cloudplatform/awsfrwk.git
