@@ -13,7 +13,7 @@ import aiohttp
 from scrapy import Selector
 
 from awsfrwk.awsfunc import aws_common_vpc
-from awsfrwk.awsmgr import get_awsenv_info
+from awsfrwk.awsmgr import get_awsenv_info, cleanup_awsenv
 from awsfrwk.distinct import _get_reids
 from awsfrwk.asyhelper import async_call
 
@@ -50,7 +50,7 @@ async def _parse_result(host, resp):
     m = _url_error_re.search(rurl.path)
     if m:
         return "SITE:%s" % m.group(1)
-    # check: is site redirect to other site, maybe nginx config have problem or host was recycled by manufacturer
+    # check: is site redirect to other site, maybe nginx config have problem or host was recycled by dns manufacturer
     if not rurl.netloc.lower().endswith(host.lower()):
         return "SITE:REDIRECT"
     # body check
@@ -72,7 +72,6 @@ async def _parse_result(host, resp):
 
 async def _req_homepage(host, url, session, redispool, task_name, task_id):
     try:
-        errinfo = None
         async with session.get(url, allow_redirects=True) as resp:
             errinfo = await _parse_result(host, resp)
     except Exception as e:
@@ -172,6 +171,7 @@ def _waiting(task_name, task_id):
         if queuing == 0:
             check += 1
             if check >= 3:
+                cleanup_awsenv(func_list)
                 break
         else:
             check = 0
