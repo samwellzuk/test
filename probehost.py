@@ -212,7 +212,7 @@ def _waiting(task_name, task_id):
                 break
         else:
             check = 0
-        print('processing ...%d%%', _get_processing())
+        print('processing ...%d%%' % _get_processing())
 
 
 def _save(outfile, task_name, task_id):
@@ -272,7 +272,7 @@ def run(infile, outfile):
             h = line.strip()
             if h:
                 if not _dns_re.match(h):
-                    print('host format error：%s, ignored', h)
+                    print('host format error：%s, ignored' % h)
                 else:
                     hostset.add(h)
         if not hostset:
@@ -293,7 +293,7 @@ def run(infile, outfile):
 
         print('finish!')
     except Exception as e:
-        print('start: exception: %s', str(e))
+        print('exception: ', str(e))
     finally:
         _clean(task_name, task_id)
 
