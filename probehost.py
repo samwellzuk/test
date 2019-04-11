@@ -17,6 +17,18 @@ from awsfrwk.awsmgr import get_awsenv_info, cleanup_awsenv
 from awsfrwk.distinct import _get_reids
 from awsfrwk.asyhelper import async_call
 
+"""
+Awsfrwk library,it is a powerful library which wrap amazon-web-services. AWS Lambda is serverless microservice
+which executes your code on thousands worker in same time.
+This script show how to use awsfrwk, and how to use coroutine. In my code, it starts 500(_probe_host_max) http 
+connections in a single worker, and run 100(_probe_host_concurrent) worker to run you code, so the total concurrent 
+number is 50,000.
+To use awsfrwk: 
+1. use aws_common_vpc to decorate on your function(homepage) , the function become a concurrent function.
+2. set AWS environment variables, see: https://boto3.amazonaws.com/v1/documentation/api/latest/guide/quickstart.html#configuration
+3. call your function in local. it will be call in aws-lambda worker pool. 
+"""
+
 _queue_host_key = 'host_%s_%d'
 _queue_success_key = 'success_%s_%d'
 _queue_failed_key = 'failed_%s_%d'
@@ -33,6 +45,9 @@ _nginx_error_page = re.compile(r'<center><h1>((?:5|4|3)[0-9][0-9]).*?</h1></cent
 
 
 async def _set_result(pool, task_name, task_id, host, err=None):
+    """
+    save result into redis
+    """
     async with pool.get() as conn:
         if err is None:
             hkey = _queue_success_key % (task_name, task_id)
@@ -45,6 +60,9 @@ async def _set_result(pool, task_name, task_id, host, err=None):
 
 
 async def _parse_result(host, resp):
+    """
+    parse response of homepage, if there have any error, return it , or return None
+    """
     rurl = urlparse(str(resp.url))
     # check: do site return friendly error: url is http://www.test.com/504.htm
     m = _url_error_re.search(rurl.path)
@@ -71,6 +89,9 @@ async def _parse_result(host, resp):
 
 
 async def _req_homepage(host, url, session, redispool, task_name, task_id):
+    """
+    access homepage of host, and parse response, save the result
+    """
     try:
         async with session.get(url, allow_redirects=True) as resp:
             errinfo = await _parse_result(host, resp)
@@ -81,6 +102,10 @@ async def _req_homepage(host, url, session, redispool, task_name, task_id):
 
 
 async def _query_homepage(task_name, task_id, redis_task_url, hostlist, loop):
+    """
+    use coroutine to access homepage of host, and save all result into redis.
+    return a list of error hosts.
+    """
     pool = await aioredis.create_pool(redis_task_url, loop=loop)
     try:
         timeout = aiohttp.ClientTimeout(total=120, connect=10, sock_connect=10, sock_read=100)
@@ -95,6 +120,7 @@ async def _query_homepage(task_name, task_id, redis_task_url, hostlist, loop):
                 f = asyncio.ensure_future(_req_homepage(h, url, session, pool, task_name, task_id), loop=loop)
                 fslist.append(f)
                 fhlist[id(f)] = h
+            # waiting all connection finish
             done, pending = await asyncio.wait(fslist, loop=loop)
             retrylist = []
             for f in done:
@@ -122,12 +148,20 @@ _homepage_max_retry = 2
 
 @aws_common_vpc(concurrent=_probe_host_concurrent, memory=256)
 def homepage(hostlist, retry_count, *, task_name, task_id=None, debug=False):
+    """
+    This is concurrent function, decorate by aws_common_vpc. Use async_call to call coroutine function, check return list,
+    and retry error host.
+    Attention: call homepage recursively, it actually run in another worker, except homepage was called with debug=True.
+    """
     retrylit = async_call(_query_homepage, (task_name, task_id, _redis_url, hostlist,))
     if retrylit and retry_count > 0:
         homepage(retrylit, retry_count - 1, task_name=task_name, task_id=task_id, debug=debug)
 
 
 def _start(hostlist, task_name, task_id):
+    """
+    save hostlist to redis , and start homepage function
+    """
     # save to redis
     redconn = _get_reids(_redis_url)
     host_key = _queue_host_key % (task_name, task_id)
@@ -148,6 +182,9 @@ def _start(hostlist, task_name, task_id):
 
 
 def _waiting(task_name, task_id):
+    """
+    waiting homepage function finish, and print processing rate
+    """
     redconn = _get_reids(_redis_url)
 
     host_key = _queue_host_key % (task_name, task_id)
@@ -179,6 +216,9 @@ def _waiting(task_name, task_id):
 
 
 def _save(outfile, task_name, task_id):
+    """
+    save result to file.
+    """
     redconn = _get_reids(_redis_url)
     host_key = _queue_host_key % (task_name, task_id)
     success_key = _queue_success_key % (task_name, task_id)
